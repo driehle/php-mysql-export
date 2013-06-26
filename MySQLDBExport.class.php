@@ -1,7 +1,7 @@
 <?php
 
 //         **********************************************
-//         ***      MySQLDBExport.class.php v2.0      ***
+//         ***     MySQLDBExport.class.php v2.0.1     ***
 //         **********************************************
 
 // -----------------------------------------------------------------------
@@ -39,7 +39,7 @@
   -----------------
   Standardmäßig wird innerhalb des Dumps ein Unix Zeilenumbruch verwendet, möchte
   man dies ändern, so ist vor dem Aufrufen von make_dump() folgendes zu setzen:
-    $export->newline = "\r\n";
+    $export->set_newline("\r\n");
   
   MySQLDBExport erzeugt normalerweise immer einen Dump für alle sich innerhalb einer
   Datenbank befindlichen Tabellen, möchte man nur eine einzelne oder nur bestimmte
@@ -48,16 +48,30 @@
     $export->make_dump("Tabellenname");
   Oder:
     $export->make_dump(array("Tabelle1", "Tabelle2"));
+    
+  Error Handling - beim Auftreten eines Fehlers liefern die Funktionen false
+  zurück und schreiben eine Nachricht in die error Variable, die sich wie folgt
+  abfragen lässt:
+    echo $export->get_error();
 
   Changelog
   ==============
-  Von Version 1.0 auf Version 2.0 wurden folgende Änderungen vorgenommen:
-  - Das Script wurde zu einer Klasse umgeschrieben (vielen Dank dafür an
-    Jeena Paradies <http://jeenaparadies.net>), deshalb ist Version 2.0 auch nicht
-    zu Version 1.0 kompatibel!!
-  - Tabellen und Spaltennamen werden nun in Backticks ausgegeben, somit werden
-    auch Tabellen mit Leerzeichen im Namen unterstützt
-  - Code Cleaning
+  Von Version 2.0 auf Version 2.0.1 wurden folgende Änderungen vorgenommen:
+  - Wie von dedlfix (<http://forum.de.selfhtml.org/?t=125488&m=809046#nachricht>)
+    angemerkt ist es nicht schön, dass Script per die() sterben zu lassen,
+    aus diesem Grund wurde die error Variable eingeführt, sowie die Funktion
+    get_error() zum Abfragen selbiger
+  - Rein theoretisch wäre es bei einer schlechten Programmierung mit dieser
+    Klasse möglich gewesen, über den Tabellennamen SQL Injections einfließen zu
+    lassen (s.a. <http://forum.de.selfhtml.org/?t=125488&m=809778#nachricht>),
+    die neue Version behebt diese Probleme durch escapen des Backticks in 
+    Tabellennamen mit der Funktion escape_table_name()
+  - Mit set_newline() ist eine Möglichkeit hinzugekommen, wie sich $newline
+    im Sinne von OOP setzen lässt
+  - Die Funktion make_dump() hat noch zwei weitere optionale Parameter die an
+    export_table_structure() und export_table_data() durchgeschleust werden,
+    dadurch sind diese Werte nicht mehr hartkodiert.
+  - Code Cleaning, Kommentierung
 */
 
 class MySQLDBExport {
@@ -65,26 +79,72 @@ class MySQLDBExport {
   var $con     = false;
   var $db      = "";
   var $newline = "\n";
+  var $error   = "";
 
   // -----------------------------------------------------------------------
   function MySQLDBExport($host = NULL, $user = NULL, $pass = NULL) {
+    // Initialisierung - sofern gewünscht, MySQL Verbindung aufbauen
     if($host != NULL AND $user != NULL) {
-      $con = mysql_connect($host, $user, $pass) OR die("Fehler beim Erstellen der Verbdingung: "
-           . mysql_error());
+      // Verbindung herstellen
+      $con = @mysql_connect($host, $user, $pass);
+      // Wenn fehlgeschlagen, Error melden und abbrechen
+      if(!$con) {
+        $this->error = "Fehler beim Herstellen der MySQL Verbindung - " . mysql_error();
+        return false;
+      }
+      // Sonst die Verbindung in $con speichern
       $this->con = $con;
+      return true;
     }
   }
   
   // -----------------------------------------------------------------------
+  function get_error() {
+    // Ausgabe der letzten Error-Meldung
+    return $this->error;
+  }
+  
+  // -----------------------------------------------------------------------
+  function set_newline($newline) {
+    // Setzen von $newline
+    $this->newline = $newline;
+    return true;
+  }
+  
+  // -----------------------------------------------------------------------
   function set_db($db) {
-    mysql_select_db($db) OR die("Fehler beim Auswählen der Datenbank: " . mysql_error());
+    // Wenn vorher bereits ein Fehler aufgetreten ist, abbrechen
+    if(!empty($this->error)) {
+      return false;
+    }
+    // Sonst versuchen, die MySQL Datenbank auszuwählen
+    $try = @mysql_select_db($db);
+    // Im Fehlerfall einen Error melden und abbrechen
+    if(!$try) {
+      $this->error = mysql_error();
+      return false;
+    }
+    // Sonst den Datenbanknamen abspeichern in $db
     $this->db = $db;
+    return true;
+  }
+  
+  // -----------------------------------------------------------------------
+  function escape_table_name($table) {
+    // Escapen von Tabellen oder Datenbanknamen gemäß
+    // <http://dev.mysql.com/doc/refman/5.0/en/legal-names.html>
+    $table = str_replace("´", "´´", $table);
+    return $table;
   }
   
   // -----------------------------------------------------------------------
   function get_tables() {
     // Liste über alle existierenden Tabellen in der Datenbank besorgen 
-    $result = mysql_query('SHOW TABLES FROM `' . $this->db . '`;') OR die(mysql_error());
+    $return = mysql_query('SHOW TABLES FROM `' . $this->escape_table_name($this->db) . '`;');
+    if(!$return) {
+      $this->error = mysql_error();
+      return false;
+    }
     // Array für Liste initialisieren
     $tables = array();
     // MySQL Ergebnisliste durchgehen und jede Tabelle in $tables hinzufügen
@@ -101,15 +161,16 @@ class MySQLDBExport {
     $sqlstring = "";
     // Wenn DROP TABLE mit ausgegeben werden soll, dieses in den
     // Ausgabestring schreiben
-    if($drop_if_exists)
-    {
-      $sqlstring .= "DROP TABLE IF EXISTS `$table`;" . $this->newline;
+    if($drop_if_exists) {
+      $sqlstring .= "DROP TABLE IF EXISTS `" . $this->escape_table_name($table) 
+                 .  "`;" . $this->newline;
     }
     // Die CREATE TABLE Syntax per SQL Befehl besorgen oder Fehler ausgeben
-    $return = mysql_query("SHOW CREATE TABLE `$table`") OR
-                die("Fehler beim Exportieren der Tabellenstruktur von $table: "
-                    . mysql_error()
-                   );
+    $return = mysql_query("SHOW CREATE TABLE `" . $this->escape_table_name($table) . "`");
+    if(!$return) {
+      $this->error = mysql_error();
+      return false;
+    }
     // Auslesen, ...
     $data = mysql_fetch_assoc($return);
     // ...in Ausgabestring schreiben ...
@@ -123,8 +184,12 @@ class MySQLDBExport {
   // -----------------------------------------------------------------------
   function export_table_data($table, $leave_out_fields = false) {
     // Alle Felder aus der Tabelle auslesen, bei Fehler abbrechen
-    $sql = "SELECT * FROM `" . $table . "`";
-    $return = mysql_query($sql) OR die(mysql_error());
+    $sql = "SELECT * FROM `" . $this->escape_table_name($table) . "`";
+    $return = mysql_query($sql);
+    if(!$return) {
+      $this->error = mysql_error();
+      return false;
+    }
     // Ausgabestring initialisieren
     $sqlstring = "";
     // Alle Ergebniszeilen abarbeiten...
@@ -140,7 +205,7 @@ class MySQLDBExport {
           continue;
         }
         // Sonst füge den aktuellen Key in das "Keysammelarray" hinzu
-        $keys[] = "`" . $key . "`";
+        $keys[] = "`" . $this->escape_table_name($key) . "`";
         // Wenn das Value NULL ist, in den String NULL umwandeln
         if($value === NULL) {
           $value = "NULL";
@@ -162,7 +227,7 @@ class MySQLDBExport {
       }
       // Aus den Sammelarrays jetzt einen INSERT INTO SQL-Befehl erstellen und diesen
       // an die Ausgabe anhängen
-      $sqlstring .= "INSERT INTO `$table` ( "
+      $sqlstring .= "INSERT INTO `" . $this->escape_table_name($table) . "` ( "
                  .  implode(", ",$keys)
                  .    " ){$this->newline}\tVALUES ( "
                  .  implode(", ",$values)
@@ -173,8 +238,7 @@ class MySQLDBExport {
   }
 
   // -----------------------------------------------------------------------
-  function make_dump($tables_input = NULL)
-  {
+  function make_dump($tables_input = NULL, $drop_if_exists = false, $leave_out_fields = false ) {
     // Ausgabestring für den Datenbank Dump initialisieren mit einer ersten Kommentarzeile
     $exportstring = "-- ------------------------------------------" . $this->newline;
     // Array für alle zu exportierenden Tabellen initialisieren
@@ -184,24 +248,23 @@ class MySQLDBExport {
     // Wenn für $tables_input ein Array übergeben wurde die Kopfzeile für einen indivi-
     // duellen Datenbankexport erzeugen und alle Einträge aus dem Array in das Tabellen-
     // array kopieren, sodass nur die im Array übergebenen Tabellen exportiert werden
-    if(is_array($tables_input))
-    {
+    if(is_array($tables_input)) {
       $tables = $tables_input;
       $exportstring .= "-- INDIVIDUAL DATABASE EXPORT              --" . $this->newline;
     }
     // Ansonsten, wenn $tables_input ein einfacher String ist, diesen als eine Tabelle
     // auffassen und nur diese eine Tabelle exportieren, als Single Database Export
-    elseif(!is_array($tables_input) AND $tables_input != NULL)
-    {
+    elseif(!is_array($tables_input) AND $tables_input != NULL) {
       $tables[0] = $tables_input;
       $exportstring .= "-- SINGLE DATABASE EXPORT                  --" . $this->newline;
     }
     // Wurde der Parameter $tables_input gar nicht mit übergeben oder ist dieser False, so
     // wird per $this->get_tables() herausgefunden welche Tabellen alle existieren und es werden
     // alle Tabellen exportiert => Full Database Export
-    else
-    {
+    else {
       $tables = $this->get_tables();
+      // Wenn get_tables() fehlschlägt, abbrechen
+      if($tables === false) return false;
       $exportstring .= "-- FULL DATABASE EXPORT                    --".$this->newline;
     }
     // In den Ausgabestring die Kopfzeilen schreiben, welche den Namen der Datenbank in
@@ -217,12 +280,15 @@ class MySQLDBExport {
                                                                      . $this->newline;
     // Gehe alle Tabellen in $tables durch und exportiere nacheinander von jeder Tabelle
     // die Struktur, sowie die Daten.
-    foreach($tables as $table)
-    {
+    foreach($tables as $table) {
+      $structure = $this->export_table_structure($table, $drop_if_exists)
+      $data      = $this->export_table_data($table, $leave_out_fields)
+      // Wenn export_table_structure() oder export_table_data() fehlschlägt, abbrechen
+      if($structure === false OR $data === false) return false;
       $exportstring .= "-- Table: $table" . $this->newline
                     .  "-- ------------------------------------------" . $this->newline
-                    .  $this->export_table_structure($table, true)
-                    .  $this->export_table_data($table, false)
+                    .  $structure
+                    .  $data
                     .  $this->newline;
     }
     // Füge dem Exportstring noch ein Ende Kennzeichen hinzu...
