@@ -56,22 +56,10 @@
 
   Changelog
   ==============
-  Von Version 2.0 auf Version 2.0.1 wurden folgende Änderungen vorgenommen:
-  - Wie von dedlfix (<http://forum.de.selfhtml.org/?t=125488&m=809046#nachricht>)
-    angemerkt ist es nicht schön, dass Script per die() sterben zu lassen,
-    aus diesem Grund wurde die error Variable eingeführt, sowie die Funktion
-    get_error() zum Abfragen selbiger
-  - Rein theoretisch wäre es bei einer schlechten Programmierung mit dieser
-    Klasse möglich gewesen, über den Tabellennamen SQL Injections einfließen zu
-    lassen (s.a. <http://forum.de.selfhtml.org/?t=125488&m=809778#nachricht>),
-    die neue Version behebt diese Probleme durch escapen des Backticks in 
-    Tabellennamen mit der Funktion escape_table_name()
-  - Mit set_newline() ist eine Möglichkeit hinzugekommen, wie sich $newline
-    im Sinne von OOP setzen lässt
-  - Die Funktion make_dump() hat noch zwei weitere optionale Parameter die an
-    export_table_structure() und export_table_data() durchgeschleust werden,
-    dadurch sind diese Werte nicht mehr hartkodiert.
-  - Code Cleaning, Kommentierung
+  Von Version 2.0.1 auf Version 2.0.2 wurden folgende Änderungen vorgenommen:
+  - in Zeile 272 und 273 (bzw. 284 und 285 in Version 2.0.1) fehlte ein abschließendes 
+    Semikolon (Syntaxfehler)
+  - in get_tables() trat eine Verwechslung von Variablen auf
 */
 
 class MySQLDBExport {
@@ -140,8 +128,8 @@ class MySQLDBExport {
   // -----------------------------------------------------------------------
   function get_tables() {
     // Liste über alle existierenden Tabellen in der Datenbank besorgen 
-    $return = mysql_query('SHOW TABLES FROM `' . $this->escape_table_name($this->db) . '`;');
-    if(!$return) {
+    $result = mysql_query('SHOW TABLES FROM `' . $this->escape_table_name($this->db) . '`;');
+    if(!$result) {
       $this->error = mysql_error();
       return false;
     }
@@ -281,8 +269,8 @@ class MySQLDBExport {
     // Gehe alle Tabellen in $tables durch und exportiere nacheinander von jeder Tabelle
     // die Struktur, sowie die Daten.
     foreach($tables as $table) {
-      $structure = $this->export_table_structure($table, $drop_if_exists)
-      $data      = $this->export_table_data($table, $leave_out_fields)
+      $structure = $this->export_table_structure($table, $drop_if_exists);
+      $data      = $this->export_table_data($table, $leave_out_fields);
       // Wenn export_table_structure() oder export_table_data() fehlschlägt, abbrechen
       if($structure === false OR $data === false) return false;
       $exportstring .= "-- Table: $table" . $this->newline
