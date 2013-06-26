@@ -1,0 +1,32 @@
+{
+	"name": "driehle/php-mysql-export",
+	"type": "library",
+	"description": "A pure PHP implementation to dump a MySQL table into a SQL file.",
+	"keywords": [
+		"MySQL",
+		"Dump",
+		"Export"
+	],
+	"homepage": "https://github.com/driehle/php-mysql-export",
+	"license": [
+		"GPL-3.0+",
+		"LGPL-3.0+"
+	],
+	"author": [
+		{
+			"name": "Dennis Riehle",
+			"role": "Developer"
+		}
+	],
+	"require": {
+		"php": ">=5.3.0"
+	},
+	"autoload": {
+		"classmap": ["library/"]
+	},
+	"extra": {
+		"branch-alias": {
+			"dev-master": "2.1-dev"
+		}
+	}
+}
